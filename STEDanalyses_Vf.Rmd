@@ -1,0 +1,275 @@
+---
+title: "STED Analyses"
+author: "Amelie Cabirol"
+date: "22/03/2021"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+    top_depth: 3
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir="/Users/acabirol/Desktop/Projects/Old_CIMEC/Manips/LTM structural plasticity NN/Brain analyses_FINAL")
+```
+
+# Introduction
+
+This experiments aims at understanding the impact of a chronic oral exposure to imidacloprid on the ultrastructure of synaptic boutons in the MB lip.
+
+Bees were reared in cages for 7 days with access to sucrose solution (50% w/w) supplemented or not with Imidacloprid (5ng/g).
+Bees were dissected after emergence (1-day-old), or three days after the end of imidacloprid treatment (5ng/g) (10-day-old). Their brains were immunostained for synapsin and imaged using a confocal STED microscope.
+The quantification of synaptic boutons and synapsin-positive units (SPUs) was performed using MATLAB and the parameters identified by Nicola by comparing with manual counting in all treatment groups (NB, CTL, IMI5).
+
+
+**Independent variables:**
+Group: C, I, NB
+
+**Dependent variables:**
+MG.Density: synaptic bouton density; continuous variable.
+MG.Volume: synaptic bouton volume; continuous variable.
+SPU.Density: synapsin-positive units density; continuous variable.
+SPU.Volume: synapsin-positive units volume; continuous variable.
+
+# Set up
+
+Load packages
+```{r}
+library(ggplot2)
+library(ggsignif)
+library(gridExtra)
+library(cowplot)
+library(lsmeans)
+library(car)
+library(sandwich)
+library(emmeans)
+library(rstatix)
+```
+
+
+Load datasets and add important variables
+
+```{r datasets}
+rm(list = ls())
+data<-read.csv('Results_sted10.csv',header=T,sep=';')
+
+data$Sample<-as.factor(data$Sample)
+lev<-levels(data$Sample)
+
+# For each sample, average values from the two ROIs (hires 1, hires 2)
+data2<-cbind(lev, rep(NA,21))
+data2<-as.data.frame(data2)
+colnames(data2)<-c('Sample','MG.Density')
+for (i in lev){
+  data2$MG.density[data2$Sample==i]<-mean(c(data$MG.density[data$Sample==i & data$hires==1], data$MG.density[data$Sample==i & data$hires==2]))
+  data2$MG.Volume[data2$Sample==i]<-mean(c(data$MG.Volume[data$Sample==i & data$hires==1], data$MG.Volume[data$Sample==i & data$hires==2]))
+  data2$SPU.density[data2$Sample==i]<-mean(c(data$SPU.density[data$Sample==i & data$hires==1], data$SPU.density[data$Sample==i & data$hires==2]))
+  data2$SPU.Volume[data2$Sample==i]<-mean(c(data$SPU.Volume[data$Sample==i & data$hires==1], data$SPU.Volume[data$Sample==i & data$hires==2]))
+  data2$Group[data2$Sample==i]<-data$Group[data$Sample==i]
+}
+data<-data2[,-2]
+
+lev.ord.group <- c("NB", "C", "I")
+```
+
+# Look at data distribution
+
+## Diagnostic plots
+
+On raw data
+```{r diagnostic, echo=FALSE}
+model<-lm(data$MG.density~data$Group)
+par(mfrow=c(2,2))
+plot(model, main='MG Density')
+model<-lm(data$MG.Volume~data$Group)
+plot(model, main='MG Volume')
+model<-lm(data$SPU.density~data$Group)
+plot(model, main='SPU Density')
+model<-lm(data$SPU.Volume~data$Group)
+plot(model, main='SPU Volume')
+```
+## Normality of residuals 
+Tested with a Shapiro test
+- According to Group
+```{r normality, echo=FALSE}
+m1 <- aov(data$MG.density ~ data$Group) 
+m2<- aov(data$MG.Volume ~ data$Group)
+m3<- aov(data$SPU.density ~ data$Group)
+m4<- aov(data$SPU.Volume ~ data$Group)
+test1<-shapiro.test(residuals(m1))
+test2<-shapiro.test(residuals(m2))
+test3<-shapiro.test(residuals(m3))
+test4<-shapiro.test(residuals(m4))
+results<-matrix(c(test1[["p.value"]],test2[["p.value"]],test3[["p.value"]],test4[["p.value"]]), ncol=1)
+colnames(results)<-"p-value"
+rownames(results)<-c("MG.Density","MG.Volume", "SPU.Density","SPU.Volume")
+as.table(results)
+
+```
+## Homoscedasticity 
+tested with a Bartlett test
+- According to Group
+```{r homoscedasticity, echo=FALSE}
+bartlett.test(data$MG.density,data$Group)
+bartlett.test(data$MG.Volume,data$Group)
+bartlett.test(data$SPU.density,data$Group)
+bartlett.test(data$SPU.Volume,data$Group)
+```
+# Statistical Analyses
+
+Data were analyzed in R. For all dependent variables, preliminary diagnostic plots (Residuals vs. Fitted and Q-Q plots) revealed presence of outliers and heteroscedasticity. To ensure statistical validity without the exclusion of data points, a unified robust modeling framework was employed.
+
+For two-photon and STED images (One-Way designs), a Welch’s ANOVA (oneway.test) was used to account for unequal variances. Post-hoc comparisons were conducted using the Games-Howell test, which is the robust equivalent to Tukey’s HSD for heteroscedastic data. In all analyses, p-values were adjusted for multiple comparisons using the Tukey method to control for the family-wise error rate. Statistical significance was defined at p = 0.05.
+
+## MG density
+```{r, echo=FALSE}
+#data<-data_no24 #for sted10
+# The Welch's ANOVA
+welch_model <- oneway.test(MG.density ~ Group, data, var.equal = FALSE)
+print(welch_model)
+
+# Post-hoc 
+posthoc <- games_howell_test(data, MG.density ~ Group)
+print(posthoc)
+```
+
+## MG Volume 
+(MG.Volume is averaged per individual)
+```{r, echo=FALSE}
+# The Welch's ANOVA
+welch_model <- oneway.test(MG.Volume ~ Group, data, var.equal = FALSE)
+print(welch_model)
+
+# Post-hoc 
+posthoc <- games_howell_test(data, MG.Volume ~ Group)
+print(posthoc)
+```
+
+## SPU density
+```{r, echo=FALSE}
+# The Welch's ANOVA
+welch_model <- oneway.test(SPU.density ~ Group, data, var.equal = FALSE)
+print(welch_model)
+
+# Post-hoc 
+posthoc <- games_howell_test(data, SPU.density ~ Group)
+print(posthoc)
+```
+
+## SPU volume
+```{r, echo=FALSE}
+# The Welch's ANOVA
+welch_model <- oneway.test(SPU.Volume ~ Group, data, var.equal = FALSE)
+print(welch_model)
+
+# Post-hoc 
+posthoc <- games_howell_test(data, SPU.Volume ~ Group)
+print(posthoc)
+```
+
+*Conclusions for 10-day-old bees: * No significant differences between groups on MG density (Welch ANOVA: F = 1.21, p = 0.32) and MG volume (F = 0.02, p = 0.98). Significant differences were found on SPU density (F = 7.14, p < 0.005) and SPU volume (F = 3.31 p = 0.055). SPU density of control and imi-treated is significatively different from newborns (p < 0.05). SPU volume of imi-treated is significatively different from newborns (p < 0.05).
+
+
+# Graphical representations
+
+```{r, echo=FALSE}
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+
+data.sum<-data_summary(data, 'MG.density', 'Group')
+
+p1<-ggplot(data.sum, aes(factor(Group,lev.ord.group), MG.density)) +  
+  geom_bar(aes(fill=factor(Group,lev.ord.group)), stat='identity', width=0.6, col="black") +
+  scale_fill_manual(values=c("gold2", "darkorange2","blue")) + 
+  ylab('MG density [#/µm^3]') +
+  theme(axis.title.x=element_blank( ), legend.position = 'none', panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  coord_cartesian(ylim=c(0,0.12))+
+  geom_errorbar(aes(ymin=MG.density-sd, ymax=MG.density+sd), width=0.2)
+
+data.sum<-data_summary(data, 'MG.Volume', 'Group')
+
+p2<-ggplot(data.sum, aes(factor(Group,lev.ord.group), MG.Volume)) +  
+  geom_bar(aes(fill=factor(Group,lev.ord.group)), stat='identity', width=0.6, col="black") +
+  scale_fill_manual(values=c("gold2", "darkorange2","blue")) + 
+  ylab('MG Volume [µm^3]') +
+  theme(axis.title.x=element_blank( ), legend.position = 'none', panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  coord_cartesian(ylim=c(0,1.5))+
+  geom_errorbar(aes(ymin=MG.Volume-sd, ymax=MG.Volume+sd), width=0.2)
+
+data.sum<-data_summary(data, 'SPU.density', 'Group')
+
+p3<-ggplot(data.sum, aes(factor(Group,lev.ord.group), SPU.density)) +  
+  geom_bar(aes(fill=factor(Group,lev.ord.group)), stat='identity', width=0.6, col="black") +
+  scale_fill_manual(values=c("gold2", "darkorange2","blue")) + 
+  ylab('SPU density[#/µm^3]') +
+  theme(axis.title.x=element_blank( ), legend.position = 'none', panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  coord_cartesian(ylim=c(0,60))+
+  geom_errorbar(aes(ymin=SPU.density-sd, ymax=SPU.density+sd), width=0.2)+
+  geom_signif(comparisons = list(c("NB","C")), tip_length=0.1, y_position=c(52), annotations = '', col='black') +
+  geom_signif(comparisons = list(c("NB","I")), tip_length=0.1, y_position=c(56), annotations = '*', col='black') 
+
+data.sum<-data_summary(data, 'SPU.Volume', 'Group')
+
+p4<-ggplot(data.sum, aes(factor(Group,lev.ord.group), SPU.Volume)) +  
+  geom_bar(aes(fill=factor(Group,lev.ord.group)), stat='identity', width=0.6, col="black") +
+  scale_fill_manual(values=c("gold2", "darkorange2","blue")) + 
+  ylab('SPU Volume [µm^3]') +
+  theme(axis.title.x=element_blank( ), legend.position = 'none', panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  coord_cartesian(ylim=c(0,0.01))+
+  geom_errorbar(aes(ymin=SPU.Volume-sd, ymax=SPU.Volume+sd), width=0.2)+
+  geom_signif(comparisons = list(c("NB","I")), tip_length=0.1, y_position=c(0.008), annotations = '*', col='black') 
+
+pFig4DEF <- cowplot::plot_grid(p1,p2,p3,p4, ncol = 2, labels = c('A', 'B', 'C', 'D'), rel_widths = c(7,7,7,3))
+pFig4DEF
+
+#ggsave("Figure_4DEF_R.pdf",pFig4DEF, width = 17.8, height = 17, units="cm", dpi=300)
+```
+
+# Correlation between dependent variables
+
+## Within each dataset and group
+```{r, echo=FALSE}
+
+# diagnostic of ditribution
+m1<-lm(SPU.density~MG.density*Group, data)
+plot(m1, which = 3)
+shapiro.test(residuals(m1))
+boxplot(residuals(m1) ~ data$Group)
+leveneTest(residuals(m1) ~ Group, data)
+
+Anova(m1) #non significant interaction for sted-7 (p = 0.07) and sted-10 (p = 0.5188)
+m2<-lm(SPU.density~MG.density+Group, data)
+anova(m1,m2)
+Anova(m2) 
+emmeans(m2, pairwise ~ Group)
+
+
+pCorr1 <- ggplot(data, aes(x = MG.density, y = SPU.density, color = Group))+
+  geom_point(size = 2, alpha = 0.6)+
+  geom_smooth(method = lm, aes(fill = Group), se=T, alpha = 0.1)+
+  theme_classic()+
+  theme(axis.title.x=element_blank( ), legend.position = 'right')+
+  scale_fill_manual(values = c("NB" = "#999999", "control" = "#0072B2", "treated" = "#D55E00")) 
+pCorr1
+
+#ggsave("correlation_Sted7_R.pdf",pCorr1, width = 17.8, height = 10, units="cm", dpi=300)
+
+```
+Sted-10: No effect of MG density on SPU density (p > 0.05). Effect of group (F = 3.8771, p < 0.05). Posthoc: Imi-treated different from newborn (p < 0.05)

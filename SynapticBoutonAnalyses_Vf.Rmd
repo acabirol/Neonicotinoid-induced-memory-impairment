@@ -1,0 +1,380 @@
+---
+title: "Analyses of synaptic bouton numbers"
+author: "Amelie Cabirol"
+date: "15/12/2020"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+    top_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir="/Users/acabirol/Desktop/Projects/Old_CIMEC/Manips/LTM structural plasticity NN/Brain analyses_FINAL")
+```
+
+# Introduction
+
+This experiments aims at understanding the respective impact of a chronic oral exposure to imidacloprid and of olfactory memory formation on the number of synaptic boutons in the MB lip.
+
+Bees were reared in cages for 7 days with access to sucrose solution (50% w/w) supplemented or not with Imidacloprid (1ng/g or (5ng/g). After 7 days, they were conditioned in 5 trials to learn the association between an odor (1-hexanol) and a sucrose reward (50% w/w). The odor and the sucrose were either presented in combination (paired conditioning) or alone (unpaired conditioning) (see Matsumoto et al. 2012). Memory tests were performed 1h or 72h after conditioning.
+Bees were dissected after emergence (1-day-old), a week after the imidacloprid treatment (5ng/g) (7-day-old), or after the 72h memory test (10-day-old). Their brains were immunostained for synapsin and imaged using a two-photon microscope. The brains collected after the memory test were the ones of successful bees from the paired conditioning, and the ones of bees from the unpaired conditioning.
+The quantification of synaptic boutons was performed using MATLAB and the parameters identified by Nicola by comparing with manual counting in all treatment groups (NB, CTL, IMI5).
+
+
+**Independent variables:**
+Age: 1, 7 or 10.
+Treatment: CTL or IMI.
+Condition: P (for paired) or U (for unpaired).
+Group: interaction of Age and Treatment.
+Group2: interaction of Treatment and Condition.
+
+**Dependent variables:**
+Lip.Volume: continuous variable.
+MG.Density: synaptic bouton density; continuous variable.
+MG.Lip: synaptic bouton number; continuous variable.
+
+# Set up
+
+Load packages
+```{r}
+library(ggplot2)
+library(ggsignif)
+library(gridExtra)
+library(cowplot)
+library(lsmeans)
+library(car)
+library(sandwich)
+library(emmeans)
+```
+
+
+Load datasets and add important variables
+
+```{r datasets}
+rm(list = ls())
+data<-read.csv('Results_twophoton.csv',header=T,sep=';')
+
+data$Age<-as.factor(data$Age)
+data$MG.Lip<-data$MG.Density*data$Lip.Volume
+
+data$Group[data$Age==1]<-'NB'
+data$Group[data$Age==7&data$Treatment=='CTL']<-'CTL'
+data$Group[data$Age==7&data$Treatment=='IMI5']<-'IMI5'
+data$Group[data$Age==10&data$Treatment=='CTL'&data$Condition=='U']<-'CTL.U'
+data$Group[data$Age==10&data$Treatment=='IMI5'&data$Condition=='U']<-'IMI5.U'
+data$Group[data$Age==10&data$Treatment=='CTL'&data$Condition=='P']<-'CTL.P'
+data$Group[data$Age==10&data$Treatment=='IMI5'&data$Condition=='P']<-'IMI5.P'
+data$Group2<-interaction(data$Treatment,data$Age)
+
+data<-data[!is.na(data$MG.Density),]
+day10<-data[data$Age==10,]
+day10$Group2<-interaction(day10$Treatment,day10$Condition)
+
+day7<-data[data$Age!=10,]
+
+
+lev.ord.mem <- c("U", "P")
+
+```
+
+# Look at data distribution
+
+## Diagnostic plots
+
+```{r diagnostic, echo=FALSE}
+model<-lm(data$Lip.Volume~data$Group)
+par(mfrow=c(2,2))
+plot(model, main='Lip Volume')
+model<-lm(data$MG.Density~data$Group)
+plot(model, main='MG Density')
+model<-lm(data$MG.Lip~data$Group)
+plot(model, main='MG Number')
+```
+
+
+*There do not seem to be any outliers*
+Even though they have high standardized residuals, points 34 and 36 are well within the Cook's distance boundaries, otherwise we would see them out of a dashed red line. It means there an not influencal for the model.
+
+
+## Normality of residuals 
+Tested with a Shapiro test
+- According to Group (Age*Treatment*Condition)
+```{r normality, echo=FALSE}
+m1 <- aov(data$Lip.Volume ~ data$Group) 
+m2<- aov(data$MG.Density ~ data$Group)
+m3<- aov(data$MG.Lip ~ data$Group)
+test1<-shapiro.test(residuals(m1))
+test2<-shapiro.test(residuals(m2))
+test3<-shapiro.test(residuals(m3))
+results<-matrix(c(test1[["p.value"]],test2[["p.value"]],test3[["p.value"]]), ncol=1)
+colnames(results)<-"p-value"
+rownames(results)<-c("Lip.Volume","MG.Density", "MG.Lip")
+as.table(results)
+```
+
+The residuals are normally distributed for all three dependent variables.
+
+## Homoscedasticity 
+tested with a Bartlett test
+- According to Group (Age*Treatment*Condition)
+```{r homoscedasticity, echo=FALSE}
+bartlett.test(data$Lip.Volume,data$Group)
+bartlett.test(data$MG.Density,data$Group)
+bartlett.test(data$MG.Lip,data$Group)
+```
+
+Variances are heterogeneous between samples for the MG Density. 
+
+The conclusion of these analyses of data distribution is that *we can use a Welch-like Anova followed by post-hoc Games-Howell test* (residuals are normally distributed but variances are heteroscedastic). It produces almost identical results to a classic Anova when variances are homoscedastic (e.g. for Lip volume). 
+
+
+# Statistical Analyses
+
+Data were analyzed in R using a linear modeling framework. Due to heteroscedasticity, a Welch-like Two-Way ANOVA (Type III Sums of Squares with White’s robust standard errors) was employed via the car package. Post-hoc pairwise comparisons were conducted using estimated marginal means with HC3 robust standard errors (emmeans and sandwich packages); this approach provides a Games-Howell-type adjustment for multi-way designs by accounting for unequal variances during group comparisons. P-values were adjusted using Tukey’s Honest Significant Difference (HSD) method to control for multiple comparisons.
+
+## Effect of memory formation
+
+The effect of memory formation was performed by comparing the paired and unpaired groups in 10-day-old bees (brains collected after the 72h memory test).
+
+### On the Lip Volume
+
+```{r Lip Volume, echo=FALSE}
+# 1. Fit a standard linear model
+model_1 <- lm(Lip.Volume ~ Treatment * Condition, data = day10)
+
+# 2. Run an ANOVA that is robust to unequal variances (Heteroscedasticity)
+# white.adjust = TRUE performs a Welch-like correction for a multi-way design.
+robust_anova1 <- Anova(model_1, type = "III", white.adjust = TRUE)
+print(robust_anova1)
+
+# 3. Post-hoc analyses - Get the means for the interaction
+# 'vcovHC' tells R to keep using the "Welch-like" robust variances during post-hoc
+res_emmeans1 <- emmeans(model_1, ~ Treatment * Condition, vcov. = vcovHC)
+pairs(res_emmeans1)
+```
+
+*Conclusions:* Significant effect of treatment (F = 4.62, p < 0.05) and significant interaction between treatment and condition (F = 4.27, p < 0.05) on Lip Volume. No effect of condition (Paired/unpaired; F = 0.9539 ; p = 0.33847 ). Post-hoc reveals significant difference between Imi-paired and Imi-unpaired (p < 0.05).
+
+### On MG Density
+
+```{r MG Density, echo=FALSE}
+# 1. Fit a standard linear model
+model_1 <- lm(MG.Density ~ Treatment * Condition, data = day10)
+
+# 2. Run an ANOVA that is robust to unequal variances (Heteroscedasticity)
+# white.adjust = TRUE performs a Welch-like correction for a multi-way design.
+robust_anova1 <- Anova(model_1, type = "III", white.adjust = TRUE)
+print(robust_anova1)
+
+# 3. Post-hoc analyses - Get the means for the interaction
+# 'vcovHC' tells R to keep using the "Welch-like" robust variances during post-hoc
+res_emmeans1 <- emmeans(model_1, ~ Treatment * Condition, vcov. = vcovHC)
+pairs(res_emmeans1)
+```
+*Conclusions:* There is no significant effect of memory formation and treatment on MG density.
+
+
+### On MG Number
+
+```{r MG Number, echo=FALSE}
+# 1. Fit a standard linear model
+model_1 <- lm(MG.Lip ~ Treatment * Condition, data = day10)
+
+# 2. Run an ANOVA that is robust to unequal variances (Heteroscedasticity)
+# white.adjust = TRUE performs a Welch-like correction for a multi-way design.
+robust_anova1 <- Anova(model_1, type = "III", white.adjust = TRUE)
+print(robust_anova1)
+
+# 3. Post-hoc analyses - Get the means for the interaction
+# 'vcovHC' tells R to keep using the "Welch-like" robust variances during post-hoc
+res_emmeans1 <- emmeans(model_1, ~ Treatment * Condition, vcov. = vcovHC)
+pairs(res_emmeans1)
+```
+
+*Conclusions:* There is a significant interaction between memory formation and imidacloprid on the number of MG (F = 6.27, p < 0.05). Significant difference between CTL unpaired and IMI unpaired (p < 0.05).
+
+
+## Effect of imidacloprid in 7-day-old bees
+
+Comparing three groups: NB, 7-day-old control and 7-day-old treated.
+
+### On the Lip Volume
+
+```{r LipVolume2, echo=FALSE}
+data2<-data[data$Age!=10,]
+
+# The Welch's ANOVA
+welch_model <- oneway.test(Lip.Volume ~ Treatment, data2, var.equal = FALSE)
+print(welch_model)
+
+# Post-hoc 
+posthoc <- games_howell_test(data2, Lip.Volume ~ Treatment)
+print(posthoc)
+```
+
+*Conclusions:* There is a significant effect of age on the lip volume of both control bees (Tukey HSD; p < 0.001) and treated bees (p < 0.005). The imidacloprid treatment did not affect the lip volume (p = 0.86).
+
+### On MG Density
+
+```{r LipVolume2, echo=FALSE}
+
+# The Welch's ANOVA
+welch_model <- oneway.test(MG.Density ~ Treatment, data2, var.equal = FALSE)
+print(welch_model)
+
+# Post-hoc 
+posthoc <- games_howell_test(data2, MG.Density ~ Treatment)
+print(posthoc)
+```
+
+*Conclusions:* No significant effect of age and treatment on MG Density.
+
+### On MG Number
+
+```{r LipVolume2, echo=FALSE}
+
+# The Welch's ANOVA
+welch_model <- oneway.test(MG.Lip ~ Treatment, data2, var.equal = FALSE)
+print(welch_model)
+
+# Post-hoc 
+posthoc <- games_howell_test(data2, MG.Lip ~ Treatment)
+print(posthoc)
+
+```
+*Conclusions:* There is a significant effect of age on the number of boutons of both control bees (p < 0.005) and treated bees (p < 0.005). The imidacloprid treatment did not affect the number of boutons (p = 0.78).
+
+# Graphical representations
+
+## Impact of memory formation
+
+```{r, echo=FALSE}
+mem.x.labels<-c('U','P','U','P')
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+
+data.sum<-data_summary(day10, 'Lip.Volume', c('Condition','Treatment'))
+
+p2<-ggplot(data.sum, aes(interaction(factor(Condition,lev.ord.mem), Treatment), Lip.Volume)) +  
+  geom_bar(aes(fill=Treatment), stat='identity', width=0.6, col="black") +
+  scale_fill_manual(values=c("gold2", "darkorange2")) + 
+  ylab('Lip Volume [µm^3]') +
+  theme(axis.title.x=element_blank( ), legend.position = 'none', panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  coord_cartesian(ylim=c(0,6000000))+
+  geom_errorbar(aes(ymin=Lip.Volume-sd, ymax=Lip.Volume+sd), width=0.2) +
+  scale_x_discrete(labels= mem.x.labels)+
+  geom_signif(comparisons = list(c("U.IMI5","P.IMI5")), tip_length=0.1, y_position=c(5500000), annotations = '*', col='black') 
+
+
+data.sum<-data_summary(day10, 'MG.Density', c('Condition','Treatment'))
+
+p3<-ggplot(data.sum, aes(interaction(factor(Condition,lev.ord.mem), Treatment), MG.Density)) +  
+  geom_bar(aes(fill=Treatment), stat='identity', width=0.6, col="black") +
+  scale_fill_manual(values=c("gold2", "darkorange2")) + 
+  ylab('MG Density [X/1 µm^3]') +
+  theme(axis.title.x=element_blank( ), legend.position = 'none', panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  coord_cartesian(ylim=c(0,0.06))+
+  geom_errorbar(aes(ymin=MG.Density-sd, ymax=MG.Density+sd), width=0.2) +
+  scale_x_discrete(labels= mem.x.labels)
+
+
+data.sum2<-data_summary(day10, 'MG.Lip', c('Condition','Treatment'))
+
+p4<-ggplot(data.sum2, aes(interaction(factor(Condition,lev.ord.mem), Treatment), MG.Lip)) +  
+  geom_bar(aes(fill=Treatment), stat='identity', width=0.6, col="black") + 
+  scale_fill_manual(values=c("gold2", "darkorange2")) + 
+  ylab('MG Number') +
+  theme_classic()+
+  theme(axis.title.x=element_blank( ), legend.position = 'none')+
+  coord_cartesian(ylim=c(0,250000))+
+  geom_errorbar(aes(ymin=MG.Lip-sd, ymax=MG.Lip+sd), width=0.2) +
+  scale_x_discrete(labels= mem.x.labels)
+my_comparisons<- list(c("U.CTL","U.IMI5"))
+p4<- p4 + geom_signif(comparisons = my_comparisons, tip_length=0.1, y_position=205000, annotations = '*', col='black')
+
+legend <- cowplot::get_legend(p2 + theme(legend.position = "right"))
+
+pFig2<-cowplot::plot_grid(p2,p3, p4,legend, ncol = 4, labels = c('A', 'B', 'C'), rel_widths = c(7,7,7,3))
+pFig2
+
+#ggsave("Figure_2_R.pdf",pFig2, width = 17.8, height = 10, units="cm", dpi=300)
+```
+
+## Impact of Age and Treatment
+
+```{r, echo=FALSE}
+# Lip volume
+data.sum3<-data_summary(data2, 'Lip.Volume', 'Group')
+data.sum3$Group<-factor(data.sum3$Group, levels=c('NB', 'CTL', 'IMI5'))
+
+p1<-ggplot(data.sum3, aes(Group, Lip.Volume)) + 
+  geom_bar(aes(fill=Group), col='Black', stat='identity', width=0.6) +
+  scale_fill_manual(values=c("lightblue", "gold2","darkorange2","gold2","darkorange2")) +
+  ylab('Lip Volume [µm^3]') +
+  theme_classic()+
+  theme(axis.title.x=element_blank( ), legend.position = 'none') +
+  coord_cartesian(ylim=c(0,6000000)) +
+  geom_errorbar(aes(ymin=Lip.Volume-sd, ymax=Lip.Volume+sd), width=0.2) +
+  geom_signif(comparisons = list(c("NB.1","CTL.7")), tip_length=0.05, annotations = '', y_position = 5300000, col='black') +
+  geom_signif(comparisons = list(c("NB.1","IMI5.7")), tip_length=0.05, annotations = '', y_position = 5450000, col='black') +
+  geom_signif(comparisons = list(c("NB.1","CTL.10")), tip_length=0.05, annotations = '', y_position = 5600000, col='black') +
+  geom_signif(comparisons = list(c("NB.1","IMI5.10")), tip_length=0.05, annotations = '**', y_position = 5750000, col='black') 
+
+# MG Density
+data.sum4<-data_summary(data2, 'MG.Density', 'Group')
+data.sum4$Group<-factor(data.sum4$Group, levels=c('NB', 'CTL', 'IMI5'))
+
+
+p2<-ggplot(data.sum4, aes(Group, MG.Density)) + 
+  geom_bar(aes(fill=Group), col='Black', stat='identity', width=0.6) +
+  scale_fill_manual(values=c("lightblue", "gold2","darkorange2","gold2","darkorange2")) +
+  ylab('MG Density [X/1 µm^3]') +
+  theme_classic()+
+  theme(axis.title.x=element_blank( ), legend.position = 'none') +
+  coord_cartesian(ylim=c(0,0.06))+
+  geom_errorbar(aes(ymin=MG.Density-sd, ymax=MG.Density+sd), width=0.2) 
+
+# MG total number
+data.sum5<-data_summary(data2, 'MG.Lip', 'Group')
+data.sum5$Group<-factor(data.sum5$Group, levels=c('NB', 'CTL', 'IMI5'))
+
+
+p3<-ggplot(data.sum5, aes(Group, MG.Lip)) + 
+  geom_bar(aes(fill=Group), col='Black', stat='identity', width=0.6) +
+  scale_fill_manual(values=c("lightblue", "gold2","darkorange2","gold2","darkorange2")) +
+  ylab('MG Number') +
+  theme_classic()+
+  theme(axis.title.x=element_blank( ), legend.position = 'none') +
+  coord_cartesian(ylim=c(0,250000)) +
+  geom_errorbar(aes(ymin=MG.Lip-sd, ymax=MG.Lip+sd), width=0.2) +
+  geom_signif(comparisons = list(c("NB.1","CTL.7")), tip_length=0.05, annotations = '', y_position = 190000, col='black') +
+  geom_signif(comparisons = list(c("NB.1","IMI5.7")), tip_length=0.05, annotations = '', y_position = 195000, col='black') +
+  geom_signif(comparisons = list(c("NB.1","CTL.10")), tip_length=0.05, annotations = '', y_position = 200000, col='black') +
+  geom_signif(comparisons = list(c("NB.1","IMI5.10")), tip_length=0.05, annotations = '**', y_position = 205000, col='black') 
+
+# Arrange all plots
+legend <- cowplot::get_legend(p2 + theme(legend.position = "right"))
+
+pFig3<-cowplot::plot_grid(p1,p2,p3, ncol = 3, labels = c('A', 'B', 'C'), rel_widths = c(1,1,1))
+pFig3
+
+
+#ggsave("Figure_S2_R.pdf",pFig3, width = 17.8, height = 10, units="cm", dpi=300)
+
+```

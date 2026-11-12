@@ -1,0 +1,214 @@
+---
+title: "Analyses of learning and memory"
+author: "Amelie Cabirol"
+date: "19/02/2021"
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+    top_depth: 3
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir="/Users/acabirol/Desktop/Projects/Old_CIMEC/Manips/LTM structural plasticity NN/Stat Analyses_FINAL")
+```
+
+# Introduction
+
+This experiments aims at understanding the impact of a chronic oral exposure to imidacloprid on olfactory learning and memory performance.
+
+Bees were reared in cages for 7 days with access to sucrose solution (50% w/w) supplemented or not with Imidacloprid (1ng/g or (5ng/g). After 7 days, they were conditioned in 5 trials to learn the association between an odor (1-hexanol) and a sucrose reward (50% w/w). The odor and the sucrose were either presented in combination (paired conditioning) or alone (unpaired conditioning) (see Matsumoto et al. 2012). Memory tests were performed 1h or 72h after conditioning.
+
+**Independent variables:**
+Group/Treatment: CTL, IMI (1ng/g) or IMI (5ng/g).
+Condition: P (for paired) or U (for unpaired).
+TestTime: 1 or 72
+
+**Dependent variables:**
+- A.1, A.2, A.3, A.4, A.5 correspond to the presence (1) or absence (0) of proboscis extension in reponse to the odor across the 5 learning trials
+-AcqScore: Sum of the responses to the five trials for each bee (from 0 to 4)
+- CS, Nod, SpecMem: response to the conditioned odour (CS) or new odor (Nod) during the memory test. SpecMem is the difference between CS and Nod (specific memory)
+
+!!! Caution !!! In data2, responses to the 5 trials are concatenated.
+
+
+# Set up
+
+Load packages
+```{r}
+library(ggplot2)
+library(ggsignif)
+library(gridExtra)
+library(cowplot)
+library(afex)
+library(lsmeans)
+library(car)
+```
+
+Load datasets and add important variables
+```{r datasets,echo=FALSE}
+rm(list = ls())
+data<-read.csv('ResultsBehaviour.csv',header=T,sep=';')
+data<-na.omit(data) # Bees who died before the memory test are not kept in the analysis
+for (i in c(1:nrow(data))){
+  data$AcqScore[i]<-sum(c(data$A.1[i],data$A.2[i],data$A.3[i],data$A.4[i],data$A.5[i]))
+}
+data<-data[data$A.1==0,]
+
+data2<-cbind(rep(1:nrow(data),5),rep(as.character(data$Group),5))
+data2<-as.data.frame(data2)
+colnames(data2)<-c('BeeID','Treatment')
+data2$PER<-c(data$A.1, data$A.2, data$A.3, data$A.4, data$A.5)
+data2$Condition<-rep(as.character(data$Condition), 5) 
+data2$Essai<-c(rep('E1',nrow(data)),rep('E2',nrow(data)),rep('E3',nrow(data)),rep('E4',nrow(data)),rep('E5',nrow(data)))
+data2$TestTime<-rep(as.character(data$TestTime), 5)
+data2$AcqScore<-rep(as.numeric(data$AcqScore), 5)
+data2$Cage<-rep(data$Cage,5)
+
+lev.ord.mem <- c("U", "P")
+```
+
+# Statistical Analyses
+
+## Learning performance
+
+Learning performance was analysed with a glmer (family=binomial; random effect is 'BeeID') followed by a posthoc analysis per trial using the fdr correction method.
+
+Model responses across conditioning trials. 
+```{r, echo=FALSE}
+m1<-glmer(PER~Essai*Condition*Treatment+(1|BeeID),data2, family=binomial(link='logit'), glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000)))
+Anova(m1)
+```
+
+Model simplification
+```{r, echo=FALSE}
+m2<-glmer(PER~Essai*Condition+Essai*Treatment+Condition*Treatment+(1|BeeID),data2, family=binomial(link='logit'), glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 100000)))
+anova(m1, m2, test='LRT')
+Anova(m2)
+```
+
+Pair-wise comparisons
+```{r, echo=FALSE}
+refgrid<-lsmeans(m2, ~Condition&Treatment|Essai) 
+pairs(refgrid, adjust='fdr') # fdr correction
+```
+
+## MTM: Memory after 1H
+
+Create dataset for learners
+```{r, echo=FALSE}
+
+learners<-data[data$Condition=='P' & data$A.5=='1',]
+unpaired<-data[data$Condition=='U',]
+learners<-rbind(learners, unpaired)
+data3<-cbind(rep(1:nrow(learners),2),rep(as.character(learners$Group),2))
+data3<-as.data.frame(data3)
+colnames(data3)<-c('BeeID','Treatment')
+data3$MemResp<-c(learners$CS,learners$Nod)
+data3$Condition<-rep(as.character(learners$Condition), 2) 
+data3$TestTime<-rep(learners$TestTime,2)
+data3$MemOdor<-c(rep('CS',nrow(learners)),rep('Nod',nrow(learners)))
+data3$SpecMem<-rep(learners$SpecMem,2)
+data3$Cage<-rep(learners$Cage,2)
+mem1H_learners<-data3[data3$TestTime==1,]
+mem72H_learners<-data3[data3$TestTime==72,]
+```
+
+Model simplification
+```{r, echo=FALSE}
+m1b<-glm(MemResp~Condition*Treatment*MemOdor, mem1H_learners, family=binomial(link=logit))
+Anova(m1b)
+
+m2b<-glm(MemResp~Condition*Treatment+MemOdor*Treatment+MemOdor*Condition, mem1H_learners, family=binomial(link=logit))
+Anova(m2b) # No interaction Condition:Treatment (Chi= 0.143, p=0.93)  
+anova(m1b,m2b, test='LRT')
+
+m3b<-glm(MemResp~MemOdor*Treatment+MemOdor*Condition, mem1H_learners, family=binomial(link=logit))
+Anova(m3b)
+anova(m2b,m3b, test='LRT')
+```
+
+Pair-wise comparisons
+```{r, echo=FALSE}
+refgrid<-lsmeans(m3b, ~Treatment*Condition|MemOdor) 
+pairs(refgrid, adjust='fdr') # fdr correction
+refgrid<-lsmeans(m3b, ~MemOdor*Condition|Treatment) 
+pairs(refgrid, adjust='fdr') # fdr correction
+```
+
+## Late-LTM: Memory after 72H
+
+Model simplification
+```{r, echo=FALSE}
+m1c<-glm(MemResp~Condition*Treatment*MemOdor, mem72H_learners, family=binomial(link=logit))
+Anova(m1c)
+
+m2c<-glm(MemResp~Condition*Treatment+MemOdor*Condition+MemOdor*Treatment, mem72H_learners, family=binomial(link=logit))
+Anova(m2c) # No interaction Treatment:MemOdor (chi= 0.906, p = 0.636)   
+anova(m1c,m2c, test='LRT')
+
+m3c<-glm(MemResp~Condition*Treatment+MemOdor*Condition, mem72H_learners, family=binomial(link=logit))
+Anova(m3c)
+anova(m2c,m3c, test='LRT')
+```
+
+Pair-wise comparisons
+```{r, echo=FALSE}
+refgrid<-lsmeans(m3c, ~Treatment*Condition|MemOdor) 
+pairs(refgrid, adjust='fdr') # fdr correction
+refgrid<-lsmeans(m3c, ~MemOdor*Condition|Treatment) 
+pairs(refgrid, adjust='fdr') # fdr correction
+```
+
+
+# Graphical representations
+
+## MTM: Memory after 1H
+
+```{r, echo=FALSE}
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+
+SpecMem<-mem1H_learners[mem1H_learners$MemOdor=='CS',]
+data.sum<-data_summary(SpecMem, 'SpecMem', c('Condition','Treatment'))
+
+p1<-ggplot(data.sum, aes(interaction(factor(Condition,lev.ord.mem), Treatment), SpecMem)) +  
+  geom_bar(aes(fill=Treatment), stat='identity', width=0.6, col="black") +
+  scale_fill_manual(values=c("gold2", "darkorange2", "violet")) + 
+  ylab('% Specicic Memory') +
+  theme(axis.title.x=element_blank( ), legend.position = 'none', panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  coord_cartesian(ylim=c(0,1))
+p1
+```
+
+## Late-LTM: Memory after 72H
+
+```{r, echo=FALSE}
+SpecMem<-mem72H_learners[mem72H_learners$MemOdor=='CS',]
+data.sum<-data_summary(SpecMem, 'SpecMem', c('Condition','Treatment'))
+
+p2<-ggplot(data.sum, aes(interaction(factor(Condition,lev.ord.mem), Treatment), SpecMem)) +  
+  geom_bar(aes(fill=Treatment), stat='identity', width=0.6, col="black") +
+  scale_fill_manual(values=c("gold2", "darkorange2", "violet")) + 
+  ylab('% Specicic Memory') +
+  theme(axis.title.x=element_blank( ), legend.position = 'none', panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  coord_cartesian(ylim=c(0,1))
+p2
+```
+
+
